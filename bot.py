@@ -1,10 +1,8 @@
 import os
 import logging
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.storage.memory import MemoryStorage
-import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from aiogram.utils import executor
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -16,9 +14,9 @@ CHANNEL_ID = os.getenv('CHANNEL_ID', '@om_valery')
 # Инициализация бота
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
+dp = Dispatcher(bot, storage=storage)
 
-# Простое хранилище пользователей в памяти (временно, вместо Google Sheets)
+# Простое хранилище пользователей в памяти
 users_database = set()
 
 # Проверка подписки на канал
@@ -34,27 +32,28 @@ async def check_subscription(user_id: int) -> bool:
 # Клавиатура с кнопкой подписки
 def get_subscription_keyboard():
     """Создает клавиатуру с кнопкой подписки и проверки"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_ID[1:]}")],
-        [InlineKeyboardButton(text="✅ Я подписался", callback_data="check_subscription")]
-    ])
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        types.InlineKeyboardButton(text="📢 Подписаться на канал", url=f"https://t.me/{CHANNEL_ID[1:]}"),
+        types.InlineKeyboardButton(text="✅ Я подписался", callback_data="check_subscription")
+    )
     return keyboard
 
 # Главное меню бота
 def get_main_menu():
     """Создает главное меню с выбором ботов"""
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎯 Тест: Выбор площадки", url="https://t.me/om_lab_bot")],
-        [InlineKeyboardButton(text="💬 О проекте", callback_data="about")]
-    ])
+    keyboard = types.InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        types.InlineKeyboardButton(text="🎯 Тест: Выбор площадки", url="https://t.me/om_lab_bot"),
+        types.InlineKeyboardButton(text="💬 О проекте", callback_data="about")
+    )
     return keyboard
 
 # Обработчик команды /start
-@dp.message(Command("start"))
+@dp.message_handler(commands=['start'])
 async def cmd_start(message: types.Message):
     """Обработчик команды /start"""
     user_id = message.from_user.id
-    username = message.from_user.username
     first_name = message.from_user.first_name
     
     # Проверяем подписку
@@ -68,9 +67,9 @@ async def cmd_start(message: types.Message):
             reply_markup=get_subscription_keyboard()
         )
     else:
-        # Сохраняем пользователя в базу (в памяти)
+        # Сохраняем пользователя в базу
         users_database.add(user_id)
-        logging.info(f"Пользователь {user_id} добавлен. Всего пользователей: {len(users_database)}")
+        logging.info(f"Пользователь {user_id} добавлен. Всего: {len(users_database)}")
         
         await message.answer(
             f"✨ Добро пожаловать, {first_name}!\n\n"
@@ -80,64 +79,65 @@ async def cmd_start(message: types.Message):
         )
 
 # Обработчик проверки подписки
-@dp.callback_query(F.data == "check_subscription")
-async def process_check_subscription(callback: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == 'check_subscription')
+async def process_check_subscription(callback_query: types.CallbackQuery):
     """Обработчик кнопки проверки подписки"""
-    user_id = callback.from_user.id
-    first_name = callback.from_user.first_name
+    user_id = callback_query.from_user.id
+    first_name = callback_query.from_user.first_name
     
     is_subscribed = await check_subscription(user_id)
     
     if is_subscribed:
-        # Сохраняем пользователя
         users_database.add(user_id)
-        logging.info(f"Пользователь {user_id} добавлен. Всего пользователей: {len(users_database)}")
+        logging.info(f"Пользователь {user_id} добавлен. Всего: {len(users_database)}")
         
-        await callback.message.edit_text(
-            f"✅ Отлично! Вы подписаны.\n\n"
-            f"✨ Добро пожаловать, {first_name}!\n\n"
-            f"Выберите действие:",
+        await bot.edit_message_text(
+            chat_id=callback_query.message.chat.id,
+            message_id=callback_query.message.message_id,
+            text=f"✅ Отлично! Вы подписаны.\n\n"
+                 f"✨ Добро пожаловать, {first_name}!\n\n"
+                 f"Выберите действие:",
             reply_markup=get_main_menu()
         )
     else:
-        await callback.answer(
+        await callback_query.answer(
             "❌ Вы еще не подписались на канал. Пожалуйста, подпишитесь и попробуйте снова.",
             show_alert=True
         )
 
 # Обработчик кнопки "О проекте"
-@dp.callback_query(F.data == "about")
-async def process_about(callback: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == 'about')
+async def process_about(callback_query: types.CallbackQuery):
     """Информация о проекте"""
-    await callback.message.edit_text(
-        "📚 *О проекте OM LAB*\n\n"
-        "Мы помогаем экспертам и предпринимателям:\n"
-        "✅ Выбрать оптимальные площадки для продвижения\n"
-        "✅ Автоматизировать маркетинг с помощью AI\n"
-        "✅ Построить эффективную стратегию присутствия\n\n"
-        "🚀 Метод 25/8 - это эволюция подхода к продвижению в соцсетях.\n\n"
-        "📢 Канал: @om_valery\n"
-        "🌐 Сайт: valery.omlab.club",
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text="📚 *О проекте OM LAB*\n\n"
+             "Мы помогаем экспертам и предпринимателям:\n"
+             "✅ Выбрать оптимальные площадки для продвижения\n"
+             "✅ Автоматизировать маркетинг с помощью AI\n"
+             "✅ Построить эффективную стратегию присутствия\n\n"
+             "🚀 Метод 25/8 - это эволюция подхода к продвижению в соцсетях.\n\n"
+             "📢 Канал: @om_valery\n"
+             "🌐 Сайт: valery.omlab.club",
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="« Назад в меню", callback_data="back_to_menu")]
-        ])
+        reply_markup=types.InlineKeyboardMarkup().add(
+            types.InlineKeyboardButton(text="« Назад в меню", callback_data="back_to_menu")
+        )
     )
 
 # Обработчик возврата в главное меню
-@dp.callback_query(F.data == "back_to_menu")
-async def process_back_to_menu(callback: types.CallbackQuery):
+@dp.callback_query_handler(lambda c: c.data == 'back_to_menu')
+async def process_back_to_menu(callback_query: types.CallbackQuery):
     """Возврат в главное меню"""
-    await callback.message.edit_text(
-        "🤖 Выберите действие:",
+    await bot.edit_message_text(
+        chat_id=callback_query.message.chat.id,
+        message_id=callback_query.message.message_id,
+        text="🤖 Выберите действие:",
         reply_markup=get_main_menu()
     )
 
 # Запуск бота
-async def main():
-    """Главная функция запуска бота"""
-    logging.info("Бот запущен!")
-    await dp.start_polling(bot)
-
 if __name__ == '__main__':
-    asyncio.run(main())
+    logging.info("Бот запущен!")
+    executor.start_polling(dp, skip_updates=True)
